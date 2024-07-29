@@ -36,10 +36,10 @@
   "extra": {
     "laravel": {
       "providers": [
-        "MOIREI\\HogQL\\ServiceProvider"
+        "MOIREI\\HogQl\\ServiceProvider"
       ],
       "aliases": {
-        "HogQl": "MOIREI\\HogQL\\Facade"
+        "HogQl": "MOIREI\\HogQl\\Facade"
       }
     }
   },
