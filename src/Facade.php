@@ -1,6 +1,6 @@
 <?php
 
-namespace MOIREI\EventTracking\Facades;
+namespace MOIREI\HogQl;
 
 use Illuminate\Support\Facades\Facade as Base;
 

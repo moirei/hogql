@@ -47,9 +47,11 @@ return [
     */
 
     'aliases' => [
-        // 'gid' => 'properties.gid',
-        // 'handle' => 'properties.handle',
-        // 'object' => 'properties.object',
+        'browser' => 'properties.$browser',
+        'device' => 'properties.$device',
+        'ip' => 'properties.$ip',
+        'os' => 'properties.$os',
+        'session_id' => 'properties.$session_id',
         // Add more aliases as needed
     ],
 

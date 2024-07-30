@@ -26,4 +26,8 @@ class Utils
             return $response->json();
         }
     }
+
+    public static function trim($str){
+        return trim($str, "'\"");
+    }
 }

@@ -29,33 +29,45 @@ class Builder extends BaseBuilder
         $parser = new PHPSQLParser();
         $parsedQuery = $parser->parse($query);
 
-        $query = DB::connection('hogql')->query();
+        $queryBuilder = DB::connection('hogql')->query();
 
         // Set the table
         if (isset($parsedQuery['FROM'])) {
             $table = $parsedQuery['FROM'][0]['table'];
-            $query->from($table);
-        }else{
-            $query->from(config('hogql.default_table', 'events'));
+            $queryBuilder->from($table);
+        } else {
+            $queryBuilder->from(config('hogql.default_table', 'events'));
         }
 
         // Add select columns
         if (isset($parsedQuery['SELECT'])) {
-            $columns = array_map(function ($column) {
-                return $column['base_expr'];
-            }, $parsedQuery['SELECT']);
-            $query->select($columns);
+            $columns = [];
+            foreach ($parsedQuery['SELECT'] as $select) {
+                if ($select['expr_type'] === 'colref') {
+                    $columns[] = $select['base_expr'];
+                } elseif ($select['expr_type'] === 'aggregate_function') {
+                    $functionName = $select['base_expr'];
+                    $subTree = $select['sub_tree'][0]['base_expr'];
+                    $alias = $select['alias']['name'] ?? null;
+                    $columns[] = DB::raw("{$functionName}({$subTree})" . ($alias ? " AS {$alias}" : ""));
+                }
+            }
+            $queryBuilder->select($columns);
         }
 
         // Add where conditions
         if (isset($parsedQuery['WHERE'])) {
-            foreach ($parsedQuery['WHERE'] as $condition) {
-                if ($condition['expr_type'] === 'colref') {
-                    $column = $condition['base_expr'];
-                    $operator = $condition['next_expr']['operator'] ?? '=';
-                    $value = $condition['next_expr']['sub_tree'][0]['base_expr'] ?? null;
-                    $query->where($column, $operator, $value);
+            for ($i = 0; $i < count($parsedQuery['WHERE']); $i += 4) {
+                $column = $parsedQuery['WHERE'][$i]['base_expr'];
+                $operator = $parsedQuery['WHERE'][$i + 1]['base_expr'];
+                $value = $parsedQuery['WHERE'][$i + 2]['base_expr'];
+
+                // Trim quotes from value if they exist
+                if (preg_match("/^'(.*)'$/", $value, $matches)) {
+                    $value = $matches[1];
                 }
+
+                $queryBuilder->where($column, $operator, $value);
             }
         }
 
@@ -64,46 +76,56 @@ class Builder extends BaseBuilder
             $groups = array_map(function ($group) {
                 return $group['base_expr'];
             }, $parsedQuery['GROUP']);
-            $query->groupBy($groups);
+            $queryBuilder->groupBy($groups);
         }
 
         // Add order by columns
         if (isset($parsedQuery['ORDER'])) {
             foreach ($parsedQuery['ORDER'] as $order) {
                 $column = $order['base_expr'];
-                $direction = isset($order['direction']) ? $order['direction'] : 'ASC';
-                $query->orderBy($column, $direction);
+                $direction = strtoupper($order['direction']) === 'DESC' ? 'DESC' : 'ASC';
+                $queryBuilder->orderBy($column, $direction);
             }
         }
 
         // Add limit (if applicable)
         if (isset($parsedQuery['LIMIT'])) {
-            $limit = $parsedQuery['LIMIT']['rowcount'];
-            $offset = $parsedQuery['LIMIT']['offset'] ?? null;
-            $query->limit($limit, $offset);
+            $limit = isset($parsedQuery['LIMIT']['rowcount']) ? $parsedQuery['LIMIT']['rowcount'] : null;
+            $offset = isset($parsedQuery['LIMIT']['offset']) ? $parsedQuery['LIMIT']['offset'] : null;
+
+            if ($limit !== null) {
+                $queryBuilder->limit($limit, $offset);
+            }
         }
 
         // Add join conditions (if applicable)
         if (isset($parsedQuery['JOIN'])) {
             foreach ($parsedQuery['JOIN'] as $join) {
-                $type = $join['join_type'];
+                $type = strtolower($join['join_type']);
                 $table = $join['table'];
-                $on = $join['ref_type'] === 'ON' ? $join['ref_clause'] : null;
-                $query->join($table, function($joinQuery) use ($on) {
-                    // Process ON clause
+                $on = $join['ref_clause'] ?? [];
+
+                $joinMethod = match ($type) {
+                    'left' => 'leftJoin',
+                    'right' => 'rightJoin',
+                    'outer' => 'outerJoin',
+                    default => 'join',
+                };
+
+                $queryBuilder->{$joinMethod}($table, function ($joinQuery) use ($on) {
                     foreach ($on as $condition) {
                         if ($condition['expr_type'] === 'colref') {
                             $column = $condition['base_expr'];
-                            $operator = $condition['next_expr']['operator'] ?? '=';
+                            $operator = $condition['next_expr']['base_expr'] ?? '=';
                             $value = $condition['next_expr']['sub_tree'][0]['base_expr'] ?? null;
                             $joinQuery->on($column, $operator, $value);
                         }
                     }
-                }, $type);
+                });
             }
         }
 
-        return $query;
+        return $queryBuilder;
     }
 
     /**
@@ -117,6 +139,9 @@ class Builder extends BaseBuilder
      */
     public function from($table, $as = null)
     {
+        $table = Utils::trim($table);
+        $as = $as ? Utils::trim($as) : null;
+
         // Validate the table name
         if (!in_array($table, $this->allowedTables)) {
             throw new \InvalidArgumentException("Table '{$table}' is not allowed.");
@@ -182,8 +207,20 @@ class Builder extends BaseBuilder
         $column = $this->applyAlias($column);
 
         // Format the values using toDateTime
-        $start = "toDateTime('{$values[0]}')";
-        $end = "toDateTime('{$values[1]}')";
+        $start = $values[0];
+        $end = $values[1];
+
+        // TODO: check against order datetime functions.
+        // See https://clickhouse.com/docs/en/sql-reference/functions/date-time-functions
+        // ['toDateTime', 'toYear', 'toQuarter', 'toMonth', 'toDay', 'toHour', 'toUnixTimestamp'];
+
+        // Check if the values are already formatted with toDateTime or fromUnixTimestamp
+        if (!str_contains($start, 'toDateTime(')) {
+            $start = "toDateTime('{$start}')";
+        }
+        if (!str_contains($end, 'toDateTime(')) {
+            $end = "toDateTime('{$end}')";
+        }
 
         if ($not) {
             return $this->whereRaw("{$column} < {$start} or {$column} > {$end}", [], $boolean);
@@ -205,7 +242,7 @@ class Builder extends BaseBuilder
         $columns = Arr::get($result, 'columns', []);
         $results = Arr::get($result, 'results', []);
 
-        $columns = array_map([$this, 'applyAlias'], $columns);
+        $columns = array_map([$this, 'getAliasRef'], $columns);
 
         return collect($results)->map(function ($row) use ($columns) {
             return array_combine($columns, $row);
@@ -245,5 +282,10 @@ class Builder extends BaseBuilder
         }
 
         return Arr::get($this->aliasMap, $column, $column);
+    }
+
+    protected function getAliasRef($column)
+    {
+        return Arr::get(array_flip($this->aliasMap), $column, $column);
     }
 }
