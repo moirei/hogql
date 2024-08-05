@@ -8,6 +8,7 @@ This PostHog (HogQL) Laravel Query Builder package enables you to interact with 
 - **Secure Access**: Validate and restrict access to specific tables within PostHog.
 - **Seamless Integration**: Execute queries and retrieve results directly from PostHog.
 - **Configurable Aliases**: Easily map and alias table and column names for better readability.
+- **Eloquent Metrics**: Easily integrate and use with [moirei/eloquent-metrics](https://github.com/moirei/eloquent-metrics).
 
 ## Installation
 
@@ -113,6 +114,19 @@ Returns the raw original [HogQLQueryResponse](https://posthog.com/docs/hogql#que
 
 ```php
 $response = HogQl::getRaw('SELECT event, COUNT() FROM events GROUP BY event ORDER BY COUNT() DESC');
+```
+
+**With moirei/eloquent-metrics**:
+
+> moirei/eloquent-metrics is Chartjs compatible.
+
+```php
+$query = HogQl::eloquent()->where('event', '$pageview');
+
+$metrics = Trend::make()
+            ->name('Page views')
+            ->period('week')
+            ->sumByDays($query);
 ```
 
 ## Tests

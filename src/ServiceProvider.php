@@ -2,7 +2,6 @@
 
 namespace MOIREI\HogQl;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -19,17 +18,18 @@ class ServiceProvider extends BaseServiceProvider
     public function register()
     {
         $config = [
-            'driver' => 'mysql',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
+            'driver' => 'hogql',
             'strict' => true,
             'engine' => null,
         ];
 
         config(['database.connections.hogql' => $config]);
 
-        DB::extend('hogql', function ($connection, $database) use ($config) {
-            return new Connection($connection, $database, '', $config);
+        $this->app->resolving('db', function ($db) {
+            $db->extend('hogql', function ($config, $name) {
+                $config['name'] = $name;
+                return new Connection($config);
+            });
         });
 
         $this->mergeConfigFrom(__DIR__.'/../config/hogql.php', 'hogql');
