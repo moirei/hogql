@@ -27,7 +27,7 @@ class Utils
         }
     }
 
-    public static function trim($str){
+    public static function unwrap($str){
         return trim($str, "'\"");
     }
 }

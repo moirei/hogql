@@ -139,8 +139,8 @@ class Builder extends BaseBuilder
      */
     public function from($table, $as = null)
     {
-        $table = Utils::trim($table);
-        $as = $as ? Utils::trim($as) : null;
+        $table = Utils::unwrap($table);
+        $as = $as ? Utils::unwrap($as) : null;
 
         // Validate the table name
         if (!in_array($table, $this->allowedTables)) {
